@@ -3,11 +3,7 @@ import SwiftUI
 struct ImageAnalysisView: View {
     @EnvironmentObject var appViewModel: AppViewModel
     @EnvironmentObject var workFolderManager: WorkFolderManager
-    @StateObject private var viewModel: ImageAnalysisViewModel
-
-    init() {
-        _viewModel = StateObject(wrappedValue: ImageAnalysisViewModel(imageAnalysisService: ImageAnalysisService(inferenceService: LlamaInferenceService(serverManager: LlamaServerManager()))))
-    }
+    @EnvironmentObject var viewModel: ImageAnalysisViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,14 +31,28 @@ struct ImageAnalysisView: View {
                                 .frame(height: 60)
                                 .border(Color.secondary.opacity(0.3))
 
-                            Button("Analyze Image") {
-                                Task {
-                                    if let folder = workFolderManager.selectedFolder {
-                                        await viewModel.analyzeImage(file: file, folderURL: folder.url)
+                            HStack {
+                                Button("Analyze Image") {
+                                    Task {
+                                        if let folder = workFolderManager.selectedFolder {
+                                            await viewModel.analyzeImage(file: file, folderURL: folder.url)
+                                        }
                                     }
                                 }
+                                .disabled(viewModel.isAnalyzing || !appViewModel.llamaServerManager.isRunning)
+
+                                if !appViewModel.llamaServerManager.isRunning && !appViewModel.llamaServerManager.isLoading {
+                                    Button("Start AI") {
+                                        Task { await appViewModel.startServerIfNeeded() }
+                                    }
+                                    .controlSize(.small)
+                                }
+
+                                if appViewModel.llamaServerManager.isLoading {
+                                    Label("Loading model...", systemImage: "hourglass")
+                                        .font(.caption).foregroundStyle(.orange)
+                                }
                             }
-                            .disabled(viewModel.isAnalyzing || !appViewModel.llamaServerManager.isRunning)
 
                             if viewModel.isAnalyzing {
                                 ProgressView("Analyzing...")
@@ -81,23 +91,15 @@ struct ImageAnalysisView: View {
             Text("Metadata").font(.headline)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
                 if let exif = metadata["{Exif}"] as? [String: Any] {
-                    if let model = exif["LensModel"] as? String {
-                        metadataRow("Lens", model)
-                    }
-                    if let iso = exif["ISOSpeedRatings"] as? [Int], let first = iso.first {
-                        metadataRow("ISO", "\(first)")
-                    }
-                    if let fNumber = exif["FNumber"] as? Double {
-                        metadataRow("Aperture", "f/\(fNumber)")
-                    }
+                    if let model = exif["LensModel"] as? String { metadataRow("Lens", model) }
+                    if let iso = exif["ISOSpeedRatings"] as? [Int], let first = iso.first { metadataRow("ISO", "\(first)") }
+                    if let fNumber = exif["FNumber"] as? Double { metadataRow("Aperture", "f/\(fNumber)") }
                     if let exposure = exif["ExposureTime"] as? Double {
                         metadataRow("Shutter", exposure < 1 ? "1/\(Int(1/exposure))" : "\(exposure)s")
                     }
                 }
                 if let tiff = metadata["{TIFF}"] as? [String: Any] {
-                    if let make = tiff["Make"] as? String {
-                        metadataRow("Camera", make)
-                    }
+                    if let make = tiff["Make"] as? String { metadataRow("Camera", make) }
                 }
                 if let width = metadata["PixelWidth"] as? Int, let height = metadata["PixelHeight"] as? Int {
                     metadataRow("Resolution", "\(width) x \(height)")

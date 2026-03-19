@@ -3,12 +3,7 @@ import SwiftUI
 struct VideoAnalysisView: View {
     @EnvironmentObject var appViewModel: AppViewModel
     @EnvironmentObject var workFolderManager: WorkFolderManager
-    @StateObject private var viewModel: VideoAnalysisViewModel
-
-    init() {
-        // Will be initialized with proper service in .onAppear
-        _viewModel = StateObject(wrappedValue: VideoAnalysisViewModel(videoAnalysisService: VideoAnalysisService(inferenceService: LlamaInferenceService(serverManager: LlamaServerManager()))))
-    }
+    @EnvironmentObject var viewModel: VideoAnalysisViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -107,14 +102,20 @@ struct VideoAnalysisView: View {
                 .frame(height: 60)
                 .border(Color.secondary.opacity(0.3))
 
-            Button("Analyze Selected Frames") {
-                Task {
-                    if let folder = workFolderManager.selectedFolder {
-                        await viewModel.analyzeSelectedFrames(fileName: file.name, folderURL: folder.url)
+            HStack {
+                Button("Analyze Selected Frames") {
+                    Task {
+                        if let folder = workFolderManager.selectedFolder {
+                            await viewModel.analyzeSelectedFrames(fileName: file.name, folderURL: folder.url)
+                        }
                     }
                 }
+                .disabled(viewModel.isAnalyzing || viewModel.selectedFrameIndices.isEmpty || !appViewModel.llamaServerManager.isRunning)
+
+                if !appViewModel.llamaServerManager.isRunning {
+                    serverStatusHint
+                }
             }
-            .disabled(viewModel.isAnalyzing || viewModel.selectedFrameIndices.isEmpty || !appViewModel.llamaServerManager.isRunning)
 
             if viewModel.isAnalyzing {
                 ProgressView("Analyzing...")
@@ -130,6 +131,21 @@ struct VideoAnalysisView: View {
                 .background(Color.secondary.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .textSelection(.enabled)
+        }
+    }
+
+    private var serverStatusHint: some View {
+        Group {
+            if appViewModel.llamaServerManager.isLoading {
+                Label("Loading model...", systemImage: "hourglass")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                Button("Start AI") {
+                    Task { await appViewModel.startServerIfNeeded() }
+                }
+                .controlSize(.small)
+            }
         }
     }
 }

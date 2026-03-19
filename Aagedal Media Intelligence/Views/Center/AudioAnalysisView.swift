@@ -3,31 +3,22 @@ import SwiftUI
 struct AudioAnalysisView: View {
     @EnvironmentObject var appViewModel: AppViewModel
     @EnvironmentObject var workFolderManager: WorkFolderManager
-    @StateObject private var viewModel: AudioAnalysisViewModel
-
-    init() {
-        _viewModel = StateObject(wrappedValue: AudioAnalysisViewModel(audioAnalysisService: AudioAnalysisService(inferenceService: LlamaInferenceService(serverManager: LlamaServerManager()), modelManager: ModelManager())))
-    }
+    @EnvironmentObject var viewModel: AudioAnalysisViewModel
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Recording section
                     recordingSection
 
                     Divider()
 
-                    // Transcription section
                     if let file = appViewModel.selectedFile, file.type == .video || file.type == .audio {
                         transcriptionSection(file)
                     }
 
-                    // Transcript display
                     if let transcript = viewModel.transcript {
                         transcriptDisplay(transcript)
-
-                        // Summarization
                         summarizationSection
                     }
 
@@ -162,6 +153,13 @@ struct AudioAnalysisView: View {
                 Task { await viewModel.summarize() }
             }
             .disabled(viewModel.isSummarizing || !appViewModel.llamaServerManager.isRunning)
+
+            if !appViewModel.llamaServerManager.isRunning && !appViewModel.llamaServerManager.isLoading {
+                Button("Start AI") {
+                    Task { await appViewModel.startServerIfNeeded() }
+                }
+                .controlSize(.small)
+            }
 
             if viewModel.isSummarizing {
                 ProgressView().controlSize(.small)

@@ -11,6 +11,13 @@ struct AagedalMediaIntelligenceApp: App {
                 .environmentObject(appViewModel.workFolderManager)
                 .environmentObject(appViewModel.modelManager)
                 .environmentObject(appViewModel.llamaServerManager)
+                .environmentObject(appViewModel.videoAnalysisVM)
+                .environmentObject(appViewModel.imageAnalysisVM)
+                .environmentObject(appViewModel.audioAnalysisVM)
+                .environmentObject(appViewModel.chatVM)
+                .task {
+                    await appViewModel.startServerIfNeeded()
+                }
         }
         .defaultSize(width: 1200, height: 800)
 

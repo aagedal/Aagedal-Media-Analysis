@@ -3,11 +3,7 @@ import SwiftUI
 struct ChatView: View {
     @EnvironmentObject var appViewModel: AppViewModel
     @EnvironmentObject var workFolderManager: WorkFolderManager
-    @StateObject private var viewModel: ChatViewModel
-
-    init() {
-        _viewModel = StateObject(wrappedValue: ChatViewModel(inferenceService: LlamaInferenceService(serverManager: LlamaServerManager())))
-    }
+    @EnvironmentObject var viewModel: ChatViewModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -75,6 +71,24 @@ struct ChatView: View {
                 .disabled(viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isGenerating || !appViewModel.llamaServerManager.isRunning)
             }
             .padding()
+
+            if !appViewModel.llamaServerManager.isRunning {
+                HStack {
+                    if appViewModel.llamaServerManager.isLoading {
+                        Label("Loading model...", systemImage: "hourglass")
+                            .font(.caption).foregroundStyle(.orange)
+                    } else {
+                        Text("AI offline")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Start") {
+                            Task { await appViewModel.startServerIfNeeded() }
+                        }
+                        .controlSize(.mini)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 4)
+            }
         }
         .onChange(of: appViewModel.selectedFile?.id) { _, _ in
             if let file = appViewModel.selectedFile, let folder = workFolderManager.selectedFolder {
