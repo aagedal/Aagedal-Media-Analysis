@@ -19,24 +19,42 @@ struct ModelMetadata: Identifiable {
     }
 
     static let allModels: [ModelMetadata] = [
-        // GGUF chat/vision models (Qwen 3.5)
+        // GGUF chat/vision models (Qwen 3.5 — all sizes support vision)
         ModelMetadata(
-            id: "qwen3.5-7b-q4",
-            name: "Qwen 3.5 7B (Q4_K_M)",
+            id: "qwen3.5-0.8b-q4",
+            name: "Qwen 3.5 0.8B (Q4_K_M)",
             type: .gguf,
-            filename: "Qwen3.5-7B-Q4_K_M.gguf",
-            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3.5-7B-GGUF/resolve/main/Qwen3.5-7B-Q4_K_M.gguf")!,
-            sizeBytes: 4_900_000_000,
-            description: "Good balance of quality and speed for Apple Silicon"
+            filename: "Qwen3.5-0.8B-Q4_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf")!,
+            sizeBytes: 533_000_000,
+            description: "Tiny, very fast. Good for quick tests and simple tasks"
         ),
         ModelMetadata(
-            id: "qwen3.5-14b-q4",
-            name: "Qwen 3.5 14B (Q4_K_M)",
+            id: "qwen3.5-2b-q4",
+            name: "Qwen 3.5 2B (Q4_K_M)",
             type: .gguf,
-            filename: "Qwen3.5-14B-Q4_K_M.gguf",
-            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3.5-14B-GGUF/resolve/main/Qwen3.5-14B-Q4_K_M.gguf")!,
-            sizeBytes: 9_100_000_000,
-            description: "Higher quality, requires 16GB+ RAM"
+            filename: "Qwen3.5-2B-Q4_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf")!,
+            sizeBytes: 1_280_000_000,
+            description: "Small and fast with decent quality. Runs on any Mac"
+        ),
+        ModelMetadata(
+            id: "qwen3.5-4b-q4",
+            name: "Qwen 3.5 4B (Q4_K_M)",
+            type: .gguf,
+            filename: "Qwen3.5-4B-Q4_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf")!,
+            sizeBytes: 2_740_000_000,
+            description: "Good balance of speed and quality for 8GB Macs"
+        ),
+        ModelMetadata(
+            id: "qwen3.5-9b-q4",
+            name: "Qwen 3.5 9B (Q4_K_M)",
+            type: .gguf,
+            filename: "Qwen3.5-9B-Q4_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf")!,
+            sizeBytes: 5_680_000_000,
+            description: "Strong quality for 16GB+ Macs. Recommended"
         ),
         // Whisper models for transcription
         ModelMetadata(
