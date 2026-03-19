@@ -83,8 +83,10 @@ class AppViewModel: ObservableObject {
         guard !llamaServerManager.isRunning, !llamaServerManager.isLoading else { return }
         guard let modelPath = modelManager.getModelPath(for: selectedGGUFModel) else { return }
 
+        let mmProjPath = modelManager.getMMProjPath(for: selectedGGUFModel)
+
         do {
-            try await llamaServerManager.startServer(modelPath: modelPath)
+            try await llamaServerManager.startServer(modelPath: modelPath, mmProjPath: mmProjPath)
             isModelLoaded = true
         } catch {
             Logger.error("Failed to start llama-server", error: error, category: Logger.processing)
@@ -96,9 +98,11 @@ class AppViewModel: ObservableObject {
         selectedGGUFModel = modelId
         guard let modelPath = modelManager.getModelPath(for: modelId) else { return }
 
+        let mmProjPath = modelManager.getMMProjPath(for: modelId)
+
         do {
             llamaServerManager.stopServer()
-            try await llamaServerManager.startServer(modelPath: modelPath)
+            try await llamaServerManager.startServer(modelPath: modelPath, mmProjPath: mmProjPath)
             isModelLoaded = true
         } catch {
             Logger.error("Failed to switch model", error: error, category: Logger.processing)

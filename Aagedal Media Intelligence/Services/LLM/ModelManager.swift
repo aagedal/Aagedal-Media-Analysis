@@ -68,19 +68,61 @@ class ModelManager: ObservableObject {
         return fileManager.fileExists(atPath: path.path) ? path : nil
     }
 
+    func getMMProjPath(for modelId: String) -> URL? {
+        guard let model = availableModels.first(where: { $0.id == modelId }),
+              let mmProjFilename = model.mmProjFilename,
+              let dir = ggufModelDirectory else { return nil }
+        let path = dir.appendingPathComponent(mmProjFilename)
+        return fileManager.fileExists(atPath: path.path) ? path : nil
+    }
+
     func isModelInstalled(_ modelId: String) -> Bool { installedModels.contains(modelId) }
+
+    func modelSupportsVision(_ modelId: String) -> Bool {
+        availableModels.first(where: { $0.id == modelId })?.supportsVision ?? false
+    }
+
+    func isMMProjInstalled(for modelId: String) -> Bool {
+        getMMProjPath(for: modelId) != nil
+    }
 
     func downloadModel(_ metadata: ModelMetadata) async throws {
         let directory = metadata.type == .gguf ? ggufModelDirectory : whisperModelDirectory
         guard let directory else { throw ModelManagerError.directoryAccessFailed }
         let destination = directory.appendingPathComponent(metadata.filename)
-        if fileManager.fileExists(atPath: destination.path) { installedModels.insert(metadata.id); return }
 
-        downloadProgress[metadata.id] = DownloadProgress(fractionCompleted: 0, totalBytesWritten: 0, totalBytesExpected: metadata.sizeBytes, bytesPerSecond: 0)
+        if !fileManager.fileExists(atPath: destination.path) {
+            try await downloadFile(
+                url: metadata.downloadURL,
+                destination: destination,
+                progressKey: metadata.id,
+                expectedBytes: metadata.sizeBytes
+            )
+        }
+        installedModels.insert(metadata.id)
+
+        // Also download mmproj file for vision support
+        if let mmProjFilename = metadata.mmProjFilename,
+           let mmProjURL = metadata.mmProjDownloadURL {
+            let mmProjDest = directory.appendingPathComponent(mmProjFilename)
+            if !fileManager.fileExists(atPath: mmProjDest.path) {
+                let mmKey = metadata.id + "-mmproj"
+                try await downloadFile(
+                    url: mmProjURL,
+                    destination: mmProjDest,
+                    progressKey: mmKey,
+                    expectedBytes: metadata.mmProjSizeBytes
+                )
+            }
+        }
+    }
+
+    private func downloadFile(url: URL, destination: URL, progressKey: String, expectedBytes: Int64) async throws {
+        downloadProgress[progressKey] = DownloadProgress(fractionCompleted: 0, totalBytesWritten: 0, totalBytesExpected: expectedBytes, bytesPerSecond: 0)
 
         do {
-            let delegate = DownloadDelegate(expectedBytes: metadata.sizeBytes) { progress in
-                Task { @MainActor [weak self] in self?.downloadProgress[metadata.id] = progress }
+            let delegate = DownloadDelegate(expectedBytes: expectedBytes) { progress in
+                Task { @MainActor [weak self] in self?.downloadProgress[progressKey] = progress }
             }
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 30
@@ -94,9 +136,8 @@ class ModelManager: ObservableObject {
                         do {
                             try FileManager.default.moveItem(at: tempURL, to: destination)
                             Task { @MainActor in
-                                self?.installedModels.insert(metadata.id)
-                                self?.downloadProgress.removeValue(forKey: metadata.id)
-                                self?.downloadTasks.removeValue(forKey: metadata.id)
+                                self?.downloadProgress.removeValue(forKey: progressKey)
+                                self?.downloadTasks.removeValue(forKey: progressKey)
                             }
                             continuation.resume()
                         } catch {
@@ -104,16 +145,16 @@ class ModelManager: ObservableObject {
                             continuation.resume(throwing: error)
                         }
                     case .failure(let error):
-                        Task { @MainActor in self?.downloadTasks.removeValue(forKey: metadata.id) }
+                        Task { @MainActor in self?.downloadTasks.removeValue(forKey: progressKey) }
                         continuation.resume(throwing: error)
                     }
                 }
-                let task = session.downloadTask(with: metadata.downloadURL)
-                self.downloadTasks[metadata.id] = task
+                let task = session.downloadTask(with: url)
+                self.downloadTasks[progressKey] = task
                 task.resume()
             }
         } catch {
-            downloadProgress.removeValue(forKey: metadata.id)
+            downloadProgress.removeValue(forKey: progressKey)
             throw error
         }
     }
@@ -131,6 +172,11 @@ class ModelManager: ObservableObject {
         if fileManager.fileExists(atPath: path.path) {
             try fileManager.removeItem(at: path)
             installedModels.remove(metadata.id)
+        }
+        // Also remove mmproj file
+        if let mmProjFilename = metadata.mmProjFilename {
+            let mmProjPath = dir.appendingPathComponent(mmProjFilename)
+            try? fileManager.removeItem(at: mmProjPath)
         }
     }
 

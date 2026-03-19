@@ -34,12 +34,10 @@ struct ImageAnalysisView: View {
                             HStack {
                                 Button("Analyze Image") {
                                     Task {
-                                        if let folder = workFolderManager.selectedFolder {
-                                            await viewModel.analyzeImage(file: file, folderURL: folder.url)
-                                        }
+                                        await viewModel.analyzeImage(file: file, folderURL: workFolderManager.selectedFolder?.url)
                                     }
                                 }
-                                .disabled(viewModel.isAnalyzing || !appViewModel.llamaServerManager.isRunning)
+                                .disabled(viewModel.isAnalyzing || !appViewModel.llamaServerManager.isRunning || !appViewModel.modelManager.modelSupportsVision(appViewModel.selectedGGUFModel))
 
                                 if !appViewModel.llamaServerManager.isRunning && !appViewModel.llamaServerManager.isLoading {
                                     Button("Start AI") {
@@ -54,8 +52,20 @@ struct ImageAnalysisView: View {
                                 }
                             }
 
+                            if appViewModel.llamaServerManager.isRunning && !appViewModel.modelManager.modelSupportsVision(appViewModel.selectedGGUFModel) {
+                                Label("Current model doesn't support image analysis. Select a vision model in Settings.", systemImage: "eye.slash")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
                             if viewModel.isAnalyzing {
                                 ProgressView("Analyzing...")
+                            }
+
+                            if let error = viewModel.error {
+                                Label(error.localizedDescription, systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
                             }
                         }
 

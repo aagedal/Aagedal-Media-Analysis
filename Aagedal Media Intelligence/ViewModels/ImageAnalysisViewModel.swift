@@ -14,7 +14,7 @@ class ImageAnalysisViewModel: ObservableObject {
         self.imageAnalysisService = imageAnalysisService
     }
 
-    func analyzeImage(file: MediaFile, folderURL: URL) async {
+    func analyzeImage(file: MediaFile, folderURL: URL?) async {
         isAnalyzing = true
         error = nil
         defer { isAnalyzing = false }

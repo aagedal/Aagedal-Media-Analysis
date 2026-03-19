@@ -207,7 +207,7 @@ class LlamaServerManager: ObservableObject {
 
     // MARK: - Server Lifecycle
 
-    func startServer(modelPath: URL) async throws {
+    func startServer(modelPath: URL, mmProjPath: URL? = nil) async throws {
         if isRunning && loadedModelPath == modelPath { return }
         if isRunning { stopServer() }
 
@@ -221,13 +221,17 @@ class LlamaServerManager: ObservableObject {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binaryPath)
-        process.arguments = [
+        var args = [
             "--model", modelPath.path,
             "--port", String(port),
             "--host", "127.0.0.1",
             "--ctx-size", "4096",
             "--n-gpu-layers", "99"
         ]
+        if let mmProjPath {
+            args += ["--mmproj", mmProjPath.path]
+        }
+        process.arguments = args
         let binaryDir = (binaryPath as NSString).deletingLastPathComponent
         process.environment = ProcessInfo.processInfo.environment
         process.currentDirectoryURL = URL(fileURLWithPath: binaryDir)
@@ -238,6 +242,16 @@ class LlamaServerManager: ObservableObject {
             try process.run()
             serverProcess = process
             loadedModelPath = modelPath
+
+            // Monitor process lifecycle — reset state if server crashes
+            process.terminationHandler = { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.serverProcess === process else { return }
+                    self.isRunning = false
+                    self.loadedModelPath = nil
+                    self.serverProcess = nil
+                }
+            }
 
             let ready = await pollHealthEndpoint(port: port, maxAttempts: 60, interval: 0.5)
             if ready {
@@ -317,7 +331,7 @@ class LlamaServerManager: ObservableObject {
         for port in portRange {
             let url = URL(string: "http://127.0.0.1:\(port)/health")!
             var req = URLRequest(url: url); req.timeoutInterval = 0.5
-            do { let _ = try await URLSession.shared.data(for: req); return nil } catch { return port }
+            do { let _ = try await URLSession.shared.data(for: req); continue } catch { return port }
         }
         return nil
     }

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 class ChatViewModel: ObservableObject {
     @Published var conversation = ChatConversation()
@@ -19,7 +20,8 @@ class ChatViewModel: ObservableObject {
         folderURL: URL? = nil,
         transcript: Transcript? = nil,
         analysisResult: AnalysisResult? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        supportsVision: Bool = false
     ) async {
         let userText = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !userText.isEmpty else { return }
@@ -49,11 +51,23 @@ class ChatViewModel: ObservableObject {
         }
 
         do {
-            let response = try await inferenceService.generateText(
-                systemPrompt: systemPrompt,
-                userMessage: userText,
-                conversationHistory: history
-            )
+            let response: String
+
+            // Include image data when model supports vision and file is an image
+            if supportsVision, let file, file.type == .image,
+               let imageData = prepareImageData(from: file.url) {
+                response = try await inferenceService.analyzeImage(
+                    imageData: imageData,
+                    prompt: userText,
+                    systemPrompt: systemPrompt
+                )
+            } else {
+                response = try await inferenceService.generateText(
+                    systemPrompt: systemPrompt,
+                    userMessage: userText,
+                    conversationHistory: history
+                )
+            }
 
             let assistantMessage = ChatMessage(role: .assistant, content: response)
             conversation.addMessage(assistantMessage)
@@ -63,6 +77,8 @@ class ChatViewModel: ObservableObject {
                 try? SidecarStorageService.saveChatHistory(conversation, fileName: fileName, folderURL: folderURL)
             }
         } catch {
+            let assistantMessage = ChatMessage(role: .assistant, content: "Error: \(error.localizedDescription)")
+            conversation.addMessage(assistantMessage)
             self.error = error
         }
 
@@ -80,6 +96,21 @@ class ChatViewModel: ObservableObject {
 
     func clearConversation() {
         conversation = ChatConversation(fileName: conversation.fileName)
+    }
+
+    private func prepareImageData(from url: URL) -> Data? {
+        guard let imageData = try? Data(contentsOf: url),
+              let image = NSImage(data: imageData) else { return nil }
+
+        let maxDim: CGFloat = 1024
+        let resized: NSImage
+        if image.size.width > maxDim || image.size.height > maxDim {
+            let scale = min(maxDim / image.size.width, maxDim / image.size.height)
+            resized = image.resized(to: NSSize(width: image.size.width * scale, height: image.size.height * scale))
+        } else {
+            resized = image
+        }
+        return resized.jpegData(compressionQuality: 0.85)
     }
 
     private func buildSystemPrompt(

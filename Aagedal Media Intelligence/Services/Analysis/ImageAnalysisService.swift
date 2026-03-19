@@ -16,7 +16,7 @@ class ImageAnalysisService: ObservableObject {
     }
 
     /// Analyze a single image with AI
-    func analyzeImage(file: MediaFile, prompt: String, folderURL: URL) async throws -> AnalysisResult {
+    func analyzeImage(file: MediaFile, prompt: String, folderURL: URL?) async throws -> AnalysisResult {
         isAnalyzing = true
         error = nil
         defer { isAnalyzing = false }
@@ -52,7 +52,9 @@ class ImageAnalysisService: ObservableObject {
             type: .imageAnalysis
         )
 
-        try SidecarStorageService.saveAnalysis(result, folderURL: folderURL)
+        if let folderURL {
+            try SidecarStorageService.saveAnalysis(result, folderURL: folderURL)
+        }
         analysisResult = result
         return result
     }

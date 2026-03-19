@@ -101,7 +101,8 @@ struct ChatView: View {
         Task {
             await viewModel.sendMessage(
                 file: appViewModel.selectedFile,
-                folderURL: workFolderManager.selectedFolder?.url
+                folderURL: workFolderManager.selectedFolder?.url,
+                supportsVision: appViewModel.modelManager.modelSupportsVision(appViewModel.selectedGGUFModel)
             )
         }
     }
