@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 
+@MainActor
 class VideoAnalysisViewModel: ObservableObject {
     @Published var prompt: String = "Describe what's happening in these video frames."
     @Published var frameCount: Int = 10

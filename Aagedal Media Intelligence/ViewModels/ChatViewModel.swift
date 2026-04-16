@@ -2,17 +2,27 @@ import Foundation
 import Combine
 import AppKit
 
+@MainActor
 class ChatViewModel: ObservableObject {
     @Published var conversation = ChatConversation()
     @Published var inputText = ""
     @Published var isGenerating = false
     @Published var currentResponse = ""
     @Published var error: Error?
+    /// User-facing error message shown inline in the chat UI, not persisted to history
+    @Published var lastErrorMessage: String?
 
     private let inferenceService: LlamaInferenceService
+    /// Cache for resized image data to avoid re-processing on every message
+    private var imageCache: (url: URL, data: Data)?
 
     init(inferenceService: LlamaInferenceService) {
         self.inferenceService = inferenceService
+
+        // Forward streaming tokens from inference service to chat view
+        inferenceService.$currentResponse
+            .receive(on: RunLoop.main)
+            .assign(to: &$currentResponse)
     }
 
     func sendMessage(
@@ -32,6 +42,7 @@ class ChatViewModel: ObservableObject {
         isGenerating = true
         currentResponse = ""
         error = nil
+        lastErrorMessage = nil
 
         let systemPrompt = buildSystemPrompt(
             file: file,
@@ -40,7 +51,7 @@ class ChatViewModel: ObservableObject {
             notes: notes
         )
 
-        // Build history
+        // Build history — only include real user/assistant messages (not error placeholders)
         var history: [[String: Any]] = []
         for msg in conversation.messages.dropLast() {
             switch msg.role {
@@ -74,11 +85,17 @@ class ChatViewModel: ObservableObject {
 
             // Save chat history
             if let folderURL, let fileName = file?.name {
-                try? SidecarStorageService.saveChatHistory(conversation, fileName: fileName, folderURL: folderURL)
+                do {
+                    try SidecarStorageService.saveChatHistory(conversation, fileName: fileName, folderURL: folderURL)
+                } catch {
+                    Logger.error("Failed to save chat history for \(fileName)", error: error, category: Logger.processing)
+                }
             }
         } catch {
-            let assistantMessage = ChatMessage(role: .assistant, content: "Error: \(error.localizedDescription)")
-            conversation.addMessage(assistantMessage)
+            // Don't pollute conversation history with error messages.
+            // Show the error transiently in the UI instead.
+            Logger.error("Chat generation failed", error: error, category: Logger.processing)
+            lastErrorMessage = error.localizedDescription
             self.error = error
         }
 
@@ -92,15 +109,27 @@ class ChatViewModel: ObservableObject {
         } else {
             conversation = ChatConversation(fileName: fileName)
         }
+        // Invalidate image cache when switching files
+        imageCache = nil
+        lastErrorMessage = nil
     }
 
     func clearConversation() {
         conversation = ChatConversation(fileName: conversation.fileName)
+        lastErrorMessage = nil
     }
 
     private func prepareImageData(from url: URL) -> Data? {
+        // Return cached data if the same image was already processed
+        if let cached = imageCache, cached.url == url {
+            return cached.data
+        }
+
         guard let imageData = try? Data(contentsOf: url),
-              let image = NSImage(data: imageData) else { return nil }
+              let image = NSImage(data: imageData) else {
+            Logger.warning("Could not read image at: \(url.lastPathComponent)", category: Logger.processing)
+            return nil
+        }
 
         let maxDim: CGFloat = 1024
         let resized: NSImage
@@ -110,7 +139,15 @@ class ChatViewModel: ObservableObject {
         } else {
             resized = image
         }
-        return resized.jpegData(compressionQuality: 0.85)
+
+        guard let jpegData = resized.jpegData(compressionQuality: 0.85) else {
+            Logger.error("Failed to encode image as JPEG: \(url.lastPathComponent)", category: Logger.processing)
+            return nil
+        }
+
+        // Cache for subsequent messages about the same image
+        imageCache = (url: url, data: jpegData)
+        return jpegData
     }
 
     private func buildSystemPrompt(

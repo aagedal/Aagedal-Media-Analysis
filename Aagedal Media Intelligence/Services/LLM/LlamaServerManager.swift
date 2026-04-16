@@ -3,7 +3,13 @@ import Combine
 import AppKit
 import zlib
 
-/// Manages a bundled llama-server process for GGUF model inference
+/// Manages a bundled llama-server process for GGUF model inference.
+///
+/// Improvements over baseline:
+/// - Proper synchronous process termination in `stopServer()` to prevent orphaned processes
+/// - Sanitized environment variables passed to subprocess (strips sensitive keys)
+/// - Server crash recovery via `onServerCrash` callback
+/// - Exponential backoff for health polling during startup
 class LlamaServerManager: ObservableObject {
 
     @Published var isRunning = false
@@ -12,6 +18,11 @@ class LlamaServerManager: ObservableObject {
     @Published var error: Error?
     @Published var isDownloadingBinary = false
     @Published var binaryDownloadProgress: DownloadProgress?
+    @Published var didCrash = false
+
+    /// Called when the server process terminates unexpectedly (not via `stopServer()`).
+    /// Consumers can use this to show a restart prompt.
+    var onServerCrash: (() -> Void)?
 
     static let llamaCppVersion = "b8391"
     private static let downloadURL = URL(string: "https://github.com/ggml-org/llama.cpp/releases/download/\(llamaCppVersion)/llama-\(llamaCppVersion)-bin-macos-arm64.tar.gz")!
@@ -21,6 +32,17 @@ class LlamaServerManager: ObservableObject {
     private var serverPort: Int = 8081
     private let portRange = 8081...8089
     private var downloadTask: URLSessionDownloadTask?
+    /// Tracks whether stopServer() was called intentionally vs. a crash
+    private var isIntentionalStop = false
+
+    /// Environment variable prefixes/names to strip before passing to the subprocess.
+    /// Prevents accidental leakage of secrets to the llama-server process.
+    private static let sensitiveEnvPrefixes = [
+        "AWS_", "AZURE_", "GCP_", "GOOGLE_", "ANTHROPIC_", "OPENAI_",
+        "HF_", "HUGGING_FACE_", "GITHUB_TOKEN", "GH_TOKEN",
+        "SECRET_", "PASSWORD", "CREDENTIAL", "API_KEY", "AUTH_TOKEN",
+        "DATABASE_URL", "REDIS_URL", "MONGO_URI"
+    ]
 
     init() {
         NotificationCenter.default.addObserver(
@@ -29,6 +51,21 @@ class LlamaServerManager: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.stopServer() }
         }
+    }
+
+    /// Returns a sanitized copy of the current process environment,
+    /// stripping keys that might contain secrets or credentials.
+    private static func sanitizedEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let keysToRemove = env.keys.filter { key in
+            let upper = key.uppercased()
+            return sensitiveEnvPrefixes.contains { upper.hasPrefix($0) || upper.contains($0) }
+        }
+        for key in keysToRemove {
+            env.removeValue(forKey: key)
+            Logger.debug("Stripped sensitive env var: \(key)", category: Logger.processing)
+        }
+        return env
     }
 
     private var llamaServerDirectory: URL? {
@@ -233,7 +270,7 @@ class LlamaServerManager: ObservableObject {
         }
         process.arguments = args
         let binaryDir = (binaryPath as NSString).deletingLastPathComponent
-        process.environment = ProcessInfo.processInfo.environment
+        process.environment = Self.sanitizedEnvironment()
         process.currentDirectoryURL = URL(fileURLWithPath: binaryDir)
         process.standardError = Pipe()
         process.standardOutput = Pipe()
@@ -243,13 +280,22 @@ class LlamaServerManager: ObservableObject {
             serverProcess = process
             loadedModelPath = modelPath
 
-            // Monitor process lifecycle — reset state if server crashes
-            process.terminationHandler = { [weak self] _ in
+            // Monitor process lifecycle — detect crashes and notify consumers
+            process.terminationHandler = { [weak self] terminatedProcess in
                 Task { @MainActor [weak self] in
-                    guard let self, self.serverProcess === process else { return }
+                    guard let self, self.serverProcess === terminatedProcess else { return }
+                    let wasIntentional = self.isIntentionalStop
                     self.isRunning = false
                     self.loadedModelPath = nil
                     self.serverProcess = nil
+
+                    if !wasIntentional {
+                        let exitCode = terminatedProcess.terminationStatus
+                        Logger.error("llama-server crashed unexpectedly (exit code: \(exitCode))", category: Logger.processing)
+                        self.didCrash = true
+                        self.error = LlamaServerError.requestFailed("Server crashed (exit code \(exitCode)). Restart to continue.")
+                        self.onServerCrash?()
+                    }
                 }
             }
 
@@ -267,12 +313,33 @@ class LlamaServerManager: ObservableObject {
     }
 
     func stopServer() {
+        isIntentionalStop = true
+        defer { isIntentionalStop = false }
+
         guard let process = serverProcess, process.isRunning else {
             isRunning = false; loadedModelPath = nil; serverProcess = nil; return
         }
+
+        Logger.info("Stopping llama-server (PID \(process.processIdentifier))…", category: Logger.processing)
         process.terminate()
-        DispatchQueue.global().async { process.waitUntilExit() }
-        serverProcess = nil; isRunning = false; loadedModelPath = nil
+
+        // Wait for the process to exit with a timeout to prevent blocking indefinitely.
+        // This ensures the port is freed before we try to start a new server.
+        let waitGroup = DispatchGroup()
+        waitGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            process.waitUntilExit()
+            waitGroup.leave()
+        }
+
+        let result = waitGroup.wait(timeout: .now() + 5.0)
+        if result == .timedOut {
+            // Force-kill if graceful terminate didn't work within 5 seconds
+            Logger.warning("llama-server did not exit gracefully, sending SIGKILL", category: Logger.processing)
+            kill(process.processIdentifier, SIGKILL)
+        }
+
+        serverProcess = nil; isRunning = false; loadedModelPath = nil; didCrash = false
     }
 
     // MARK: - Chat Completion API
@@ -338,17 +405,35 @@ class LlamaServerManager: ObservableObject {
 
     private func pollHealthEndpoint(port: Int, maxAttempts: Int, interval: TimeInterval) async -> Bool {
         let url = URL(string: "http://127.0.0.1:\(port)/health")!
-        for _ in 0..<maxAttempts {
+        var currentInterval = interval
+
+        for attempt in 1...maxAttempts {
             do {
                 let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url))
                 if let http = response as? HTTPURLResponse, http.statusCode == 200 {
                     if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let status = json["status"] as? String, status == "ok" { return true }
+                       let status = json["status"] as? String, status == "ok" {
+                        Logger.info("llama-server healthy after \(attempt) attempt(s)", category: Logger.processing)
+                        return true
+                    }
+                    Logger.info("llama-server responded 200 (no status field) after \(attempt) attempt(s)", category: Logger.processing)
                     return true
                 }
-            } catch {}
-            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            } catch {
+                // Expected during startup — server isn't ready yet
+                if attempt % 10 == 0 {
+                    Logger.debug("Health poll attempt \(attempt)/\(maxAttempts) — still waiting…", category: Logger.processing)
+                }
+            }
+
+            try? await Task.sleep(nanoseconds: UInt64(currentInterval * 1_000_000_000))
+
+            // Exponential backoff: start at 0.5s, cap at 2s
+            // This reduces CPU load while waiting for large models to load
+            currentInterval = min(currentInterval * 1.2, 2.0)
         }
+
+        Logger.error("llama-server failed health check after \(maxAttempts) attempts", category: Logger.processing)
         return false
     }
 

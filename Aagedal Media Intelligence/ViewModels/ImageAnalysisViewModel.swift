@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 
+@MainActor
 class ImageAnalysisViewModel: ObservableObject {
     @Published var prompt: String = "Describe this image in detail."
     @Published var analysisResult: AnalysisResult?

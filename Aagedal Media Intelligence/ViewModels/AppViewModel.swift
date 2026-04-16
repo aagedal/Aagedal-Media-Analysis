@@ -75,6 +75,15 @@ class AppViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        // Clear selected file when switching folders
+        workFolderManager.$selectedFolder
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.selectedFile = nil
+                self?.selectedTab = .files
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Model Management

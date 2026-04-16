@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 
+@MainActor
 class AudioAnalysisViewModel: ObservableObject {
     @Published var selectedWhisperModel: String = "whisper-medium"
     @Published var language: String = "auto"

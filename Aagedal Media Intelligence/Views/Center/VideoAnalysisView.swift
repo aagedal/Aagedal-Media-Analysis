@@ -63,6 +63,11 @@ struct VideoAnalysisView: View {
                 ProgressView().controlSize(.small)
             }
         }
+        if let error = viewModel.error {
+            Label(error.localizedDescription, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
     }
 
     private var frameGrid: some View {
@@ -119,6 +124,11 @@ struct VideoAnalysisView: View {
 
             if viewModel.isAnalyzing {
                 ProgressView("Analyzing...")
+            }
+            if let error = viewModel.error {
+                Label(error.localizedDescription, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
     }
